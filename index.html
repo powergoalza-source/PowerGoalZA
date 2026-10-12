@@ -126,7 +126,7 @@ nav .main.live{background:var(--coral);color:#fff}
   <label class="row"><span>Spoken count every 10 shots</span><input type="checkbox" id="voice"></label>
   <label class="row"><span>Beep on each shot</span><input type="checkbox" id="sound"></label>
   <label class="row"><span>Use microphone for kick detection</span><input type="checkbox" id="micOn"></label>
-  <p class="note">Microphone access is optional. It listens locally for sharp impacts and only supports a shot count when a foot swing is detected nearby. Rebound noise can still cause occasional false counts.</p>
+  <p class="note">Microphone access is optional. It listens locally for the low "thud" of the ball hitting the rebounder (60 to 250 Hz) and counts one shot per sharp thud, with a short cooldown so net wobble is not double counted. Nothing is recorded or uploaded.</p>
   <label class="row"><span>Show ball and feet markers</span><input type="checkbox" id="track"></label>
   <label class="row"><span>Show tuning numbers</span><input type="checkbox" id="debug"></label>
   <label class="row"><span>Camera</span>
@@ -159,7 +159,6 @@ nav .main.live{background:var(--coral);color:#fff}
 <div id="toast" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
 <script>
 const $=id=>document.getElementById(id);
@@ -198,32 +197,79 @@ try{
 
 /* ---------- state ---------- */
 const S={running:false,activeMs:0,tick:performance.now(),shots:[],prompt:'R',ballOn:false,finished:false};
-const T={hist:[],lastSeen:0,calmSince:0,armedA:false,tr:0,lastShot:0,calmAtLast:false,lastBox:null,growth:0,speed:0,lastImpact:0,impactLevel:0};
+const T={hist:[],lastSeen:0,calmSince:0,armedA:false,tr:0,lastShot:0,calmAtLast:false,lastBox:null,growth:0,speed:0,lastImpact:0,impactLevel:0,predicted:false};
 const P={hist:[],last:null,torso:150};
-let lastSwingT=-1e9,ballModel=null,poseDet=null,stream=null,looping=false,frameN=0,errCount=0,wake=null,ac=null,micStream=null,micAnalyser=null,micBuffer=null,micRAF=0,micNoise=0.012,micLastPeak=0;
+let lastSwingT=-1e9,ballModel=null,poseDet=null,stream=null,looping=false,frameN=0,errCount=0,wake=null,ac=null,micStream=null,micAnalyser=null,micBuffer=null,micRAF=0,micNoise=NaN,micNoiseHi=NaN,micLastPeak=0,micSrc=null,micGain=null,micArmed=true,micMuteUntil=0,micHist=[];
 const thr=()=>2.0-0.15*cfg.sens,G=()=>0.8*thr(),V=()=>3*thr();
 const drillParts=()=>cfg.drill.split(':');
 
 /* ---------- helpers ---------- */
 const fmt=ms=>{const s=Math.max(0,Math.round(ms/1000));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 function toast(m,ms=2600){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,ms)}
-function beep(){if(!cfg.sound)return;try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=880;g.gain.value=.08;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.06)}catch(e){}}
+function beep(){if(!cfg.sound)return;micMuteUntil=performance.now()+300;try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=880;g.gain.value=.08;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.06)}catch(e){}}
 function say(t){if(!cfg.voice||!('speechSynthesis' in window))return;try{const u=new SpeechSynthesisUtterance(t);u.rate=1.05;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 function unlockAudio(){try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();if('speechSynthesis' in window)speechSynthesis.speak(new SpeechSynthesisUtterance(''))}catch(e){}}
+/* ---------- microphone: low-frequency thud detector (FFT band, 60-250 Hz) ---------- */
+const MIC_BAND_HZ=[60,250];      // thud window for a heavy ball hitting a rebounder
+const MIC_COOLDOWN_MS=400;       // debounce after a logged shot (net wobble, echo)
+const MIC_MIN_DB=-90;            // ignore spikes whose band level is below this (digital silence flutter)
+const MIC_FFT=4096;              // ~85 ms window at 48 kHz, ~11.7 Hz per bin; survives short main-thread stalls
+const MIC_EXCLUSIVE=true;        // mic on: only the thud counts shots (camera still tracks ball + feet for foot split)
+const MIC_REQUIRE_BALL_MS=0;     // >0: also require a ball-sized moving blob seen within this many ms of the thud
+const MIC_HIGH_BAND_HZ=[500,4000]; // reference band: claps, shouts and whistles light this up far more than the thud band
+const MIC_HIGH_GUARD_DB=10;      // reject a spike if the reference band rose this many dB MORE than the thud band (set 99 to switch off)
+const MIC={lo:6,hi:21,hl:43,hh:341,hz:'',db:-140,rise:0,need:0,hiRise:0,n:0};
+const micNeedDb=()=>16-1.1*cfg.sens;   // dB above the room baseline: sensitivity 1 = 14.9, 5 = 10.5, 10 = 5.0
+function micBins(rate,fft){const hz=rate/fft;return{lo:Math.max(1,Math.ceil(MIC_BAND_HZ[0]/hz)),hi:Math.floor(MIC_BAND_HZ[1]/hz),hz}}
+function micBandDb(a,lo,hi){let p=0;for(let k=lo;k<=hi;k++){const v=a[k];if(v>-140)p+=Math.pow(10,v/10)}return p>0?10*Math.log10(p):-140}
+/* true on the first frame of a sharp rise inside the band; false while it rings out */
+function micDetect(db,now,dbHi=-140){
+  if(!isFinite(micNoise))micNoise=db;
+  if(!isFinite(micNoiseHi))micNoiseHi=dbHi;
+  if(++MIC.n<20){micNoise+=(db-micNoise)*0.2;micNoiseHi+=(dbHi-micNoiseHi)*0.2;return false}   // warm-up: learn the room first
+  micHist.push({t:now,db});while(micHist.length&&now-micHist[0].t>120)micHist.shift();
+  let lo=db;for(const h of micHist)if(h.db<lo)lo=h.db;
+  const need=micNeedDb(),over=db-micNoise,rise=db-lo,overHi=dbHi-micNoiseHi;
+  MIC.db=db;MIC.rise=rise;MIC.need=need;MIC.hiRise=overHi;
+  const hot=db>MIC_MIN_DB&&over>=need&&rise>=need*0.6                 // above baseline AND sharp (not a slow swell)
+    &&(overHi-over)<=MIC_HIGH_GUARD_DB;                               // and low-frequency led (not a clap or shout)
+  if(!hot){
+    micNoise+=(db-micNoise)*(db>micNoise?0.02:0.1);                   // baselines creep up slowly, fall quickly
+    micNoiseHi+=(dbHi-micNoiseHi)*(dbHi>micNoiseHi?0.02:0.1);
+    if(over<need*0.5)micArmed=true;                                   // re-arm once the thud has died away
+    return false;
+  }
+  if(!micArmed||now-micLastPeak<MIC_COOLDOWN_MS)return false;
+  micArmed=false;return true;
+}
 async function startMic(){
   if(micAnalyser)return true;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){toast('Microphone needs a secure HTTPS page and browser support.',4000);return false}
   try{
     micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
     ac=ac||new(window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')await ac.resume();
-    const src=ac.createMediaStreamSource(micStream);micAnalyser=ac.createAnalyser();micAnalyser.fftSize=1024;micAnalyser.smoothingTimeConstant=0;src.connect(micAnalyser);micBuffer=new Uint8Array(micAnalyser.fftSize);micNoise=0.012;micLastPeak=0;
-    const sample=()=>{if(!micAnalyser)return;micRAF=requestAnimationFrame(sample);micAnalyser.getByteTimeDomainData(micBuffer);let sum=0;for(let i=0;i<micBuffer.length;i++){const v=(micBuffer[i]-128)/128;sum+=v*v}const rms=Math.sqrt(sum/micBuffer.length);const now=performance.now();const threshold=Math.max(0.055,micNoise*3.2);
-      if(rms<threshold)micNoise=micNoise*0.96+rms*0.04;
-      if(rms>threshold&&now-micLastPeak>180){micLastPeak=now;T.lastImpact=now;T.impactLevel=rms;if(S.running&&Math.abs(now-lastSwingT)<550&&now-T.lastShot>700){fire('audio+foot')}}
+    micSrc=ac.createMediaStreamSource(micStream);micAnalyser=ac.createAnalyser();
+    micAnalyser.fftSize=MIC_FFT;micAnalyser.smoothingTimeConstant=0;micAnalyser.minDecibels=-140;micAnalyser.maxDecibels=0;
+    micGain=ac.createGain();micGain.gain.value=0;                      // silent path to the output: some Safari versions only pull graphs that reach the destination
+    micSrc.connect(micAnalyser);micAnalyser.connect(micGain);micGain.connect(ac.destination);
+    micBuffer=new Float32Array(micAnalyser.frequencyBinCount);
+    const b=micBins(ac.sampleRate,MIC_FFT);MIC.lo=b.lo;MIC.hi=b.hi;MIC.hl=Math.ceil(MIC_HIGH_BAND_HZ[0]/b.hz);MIC.hh=Math.min(micAnalyser.frequencyBinCount-1,Math.floor(MIC_HIGH_BAND_HZ[1]/b.hz));MIC.hz=Math.round(b.lo*b.hz)+'-'+Math.round(b.hi*b.hz)+' Hz';
+    micNoise=NaN;micNoiseHi=NaN;micLastPeak=0;micArmed=true;micHist=[];MIC.n=0;
+    const sample=()=>{
+      if(!micAnalyser)return;
+      micRAF=requestAnimationFrame(sample);
+      const now=performance.now();
+      micAnalyser.getFloatFrequencyData(micBuffer);
+      const db=micBandDb(micBuffer,MIC.lo,MIC.hi),dbHi=micBandDb(micBuffer,MIC.hl,MIC.hh);
+      if(now<micMuteUntil||('speechSynthesis' in window&&speechSynthesis.speaking)){micHist.length=0;return}   // our own beep / spoken count
+      if(micDetect(db,now,dbHi)){
+        T.lastImpact=now;T.impactLevel=db-micNoise;
+        if(S.running&&(!MIC_REQUIRE_BALL_MS||now-T.lastSeen<MIC_REQUIRE_BALL_MS)){if(fire('audio'))micLastPeak=now}
+      }
     };sample();toast('Microphone kick detection enabled.',2500);return true;
   }catch(e){stopMic();$('micOn').checked=false;cfg.micOn=false;saveCfg();toast('Microphone access was blocked. Allow microphone access in Safari settings.',4500);return false}
 }
-function stopMic(){if(micRAF)cancelAnimationFrame(micRAF);micRAF=0;micAnalyser=null;micBuffer=null;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}T.lastImpact=0;}
+function stopMic(){if(micRAF)cancelAnimationFrame(micRAF);micRAF=0;micAnalyser=null;micBuffer=null;try{if(micSrc)micSrc.disconnect();if(micGain)micGain.disconnect()}catch(e){}micSrc=null;micGain=null;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}T.lastImpact=0;}
 async function setWake(on){try{if(on&&'wakeLock' in navigator){wake=await navigator.wakeLock.request('screen')}else if(wake){await wake.release();wake=null}}catch(e){}}
 function showLoading(msg,retry){$('loading').hidden=false;$('loadMsg').textContent=msg;$('retry').hidden=!retry;document.querySelector('.spin').hidden=!!retry}
 const hideLoading=()=>$('loading').hidden=true;
@@ -232,16 +278,17 @@ const hideLoading=()=>$('loading').hidden=true;
 async function startCamera(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('secure');
   if(stream)stream.getTracks().forEach(t=>t.stop());
-  stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:cfg.facing},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}});
+  stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:cfg.facing},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60}}});
   const cam=$('cam');cam.setAttribute('playsinline','');cam.muted=true;cam.srcObject=stream;await cam.play();
 }
 async function loadModels(){
-  if(!window.tf||!window.cocoSsd)throw new Error('libs');
-  await tf.ready();
-  if(!ballModel){showLoading('Loading ball detector…');ballModel=await cocoSsd.load({base:'lite_mobilenet_v2'})}
+  if(!ballModel)ballModel=makeMotionTracker();            // frame-differencing tracker, nothing to download
   if(!poseDet){
-    try{showLoading('Loading body tracker…');poseDet=await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,{modelType:poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING})}
-    catch(e){poseDet=null;toast('Foot tracking could not load. Shots will still be counted.',4000)}
+    try{
+      if(!window.tf||!window.poseDetection)throw new Error('libs');
+      await tf.ready();showLoading('Loading body tracker…');
+      poseDet=await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,{modelType:poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING});
+    }catch(e){poseDet=null;toast('Foot tracking could not load. Shots will still be counted.',4000)}
   }
 }
 async function boot(){
@@ -251,9 +298,175 @@ async function boot(){
   }
   try{await loadModels()}catch(e){showLoading('The detectors could not load. Check your internet connection and try again.',true);return}
   hideLoading();
+  if(cfg.micOn&&!micAnalyser)startMic();
   if(!looping){looping=true;requestAnimationFrame(loop)}
 }
 
+/* ---------- ball tracker: frame differencing + background subtraction ---------- */
+/*== BALL TRACKER START ==*/
+const BALL_CM={4:21,5:22};       // size 4 and size 5 ball diameters (cm)
+const DIST_FT={near:8,far:12};   // typical phone-to-ball distance (ft)
+const CAM_HFOV_DEG=66;           // long-side field of view of the iPhone 14 Pro Max 1x camera in video mode; nudge it using "Show tuning numbers"
+const GRID_LONG=320;             // motion analysis grid, long side in px (frames are shrunk to this)
+const MAX_COAST=2;               // frames to predict through blur or a rebound before the track is dropped
+const FOOT_EXCL=0.45;            // new blobs closer than this many torso lengths to an ankle are ignored (feet look like balls)
+const ballPx=(ft,cm)=>(GRID_LONG/2)/Math.tan(CAM_HFOV_DEG*Math.PI/360)*(cm/100)/(ft*0.3048);   // apparent diameter on the grid
+function ballWindow(){
+  const a=d=>Math.PI/4*d*d,dMin=ballPx(DIST_FT.far,BALL_CM[4]),dMax=ballPx(DIST_FT.near,BALL_CM[5]);
+  // smallest = size 4 at 12 ft, only 45% of it need show up as moving pixels (white ball on pale wall)
+  // largest  = size 5 at 8 ft, x3 to allow motion-blur streaks and the ball nearing the camera; player legs/torso are bigger
+  return{dMin,dMax,aMin:0.45*a(dMin),aMax:3*a(dMax)};
+}
+const M={w:0,h:0,bg:null,p1:null,p2:null,m:null,t2:null,vis:null,st:null,track:null,seed:null,lost:null,dbg:[],info:{cnt:0,n:0,area:0,dia:0,tiny:0,big:0,shape:0,shake:0}};
+function mtAlloc(w,h){const n=w*h;M.w=w;M.h=h;M.bg=new Float32Array(n);M.p1=new Uint8Array(n);M.p2=new Uint8Array(n);M.m=new Uint8Array(n);M.t2=new Uint8Array(n);M.vis=new Uint8Array(n);M.st=new Int32Array(n)}
+function mtBlur(a,b,w,h){
+  b.set(a);
+  for(let y=1;y<h-1;y++)for(let x=1,i=y*w+1;x<w-1;x++,i++)
+    b[i]=(a[i-w-1]+2*a[i-w]+a[i-w+1]+2*a[i-1]+4*a[i]+2*a[i+1]+a[i+w-1]+2*a[i+w]+a[i+w+1])>>4;
+}
+function mtMorph(src,dst,w,h,dil){
+  dst.fill(0);
+  for(let y=1;y<h-1;y++)for(let x=1,i=y*w+1;x<w-1;x++,i++){
+    const q=src[i-w-1]+src[i-w]+src[i-w+1]+src[i-1]+src[i]+src[i+1]+src[i+w-1]+src[i+w]+src[i+w+1];
+    dst[i]=dil?(q>0?1:0):(q===9?1:0);
+  }
+}
+function segDist(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay,l=dx*dx+dy*dy;
+  const u=l>0?Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/l)):0;
+  return Math.hypot(px-(ax+u*dx),py-(ay+u*dy));
+}
+/* 3-frame vector estimate: newest segment weighted most; a sudden reversal (rebound) trusts the newest segment only */
+function mtVel(tr){
+  const p=tr.pts,n=p.length;if(n<2)return;
+  const seg=(a,b)=>{const dt=Math.max(0.001,(b.t-a.t)/1000);return[(b.x-a.x)/dt,(b.y-a.y)/dt]};
+  const v2=seg(p[n-2],p[n-1]);
+  if(n===2){tr.vx=v2[0];tr.vy=v2[1];return}
+  const v1=seg(p[n-3],p[n-2]);
+  if(v1[0]*v2[0]+v1[1]*v2[1]<0){tr.vx=v2[0];tr.vy=v2[1];return}
+  tr.vx=0.35*v1[0]+0.65*v2[0];tr.vy=0.35*v1[1]+0.65*v2[1];
+}
+/* g: blurred gray frame (Uint8Array w*h). returns undefined = camera has not delivered a new frame, null = no ball, else the track state */
+function mtStep(g,w,h,t,sens,excl){
+  const n=w*h,I=M.info;
+  if(!M.bg||M.w!==w||M.h!==h){mtAlloc(w,h);for(let i=0;i<n;i++){M.bg[i]=g[i];M.p1[i]=g[i];M.p2[i]=g[i]}M.track=null;M.seed=null;return null}
+  let same=true;for(let i=0;i<n;i+=7){if(g[i]!==M.p1[i]){same=false;break}}
+  if(same)return undefined;
+  const bg=M.bg,p1=M.p1,p2=M.p2,m=M.m;
+  let sI=0,sB=0;for(let i=0;i<n;i++){sI+=g[i];sB+=bg[i]}
+  const off=(sI-sB)/n;                                  // global brightness drift (auto exposure) is subtracted out
+  const T1=Math.max(12,34-2*sens),T2=Math.max(7,T1*0.6),AL=0.04;
+  let cnt=0;
+  for(let i=0;i<n;i++){
+    const v=g[i];
+    // moving = differs from the learned background AND changed in either of the last two frame steps (3-frame test)
+    const on=Math.abs(v-bg[i]-off)>T1&&(Math.abs(v-p1[i])>T2||Math.abs(p1[i]-p2[i])>T2);
+    m[i]=on?1:0;
+    if(on)cnt++;else bg[i]+=(v-off-bg[i])*AL;           // static pixels (incl. a resting ball) melt into the background
+  }
+  p2.set(p1);p1.set(g);
+  I.cnt=cnt;I.n=0;I.tiny=0;I.big=0;I.shape=0;M.dbg=[];
+  if(cnt>0.3*n){for(let i=0;i<n;i++)bg[i]=g[i];M.track=null;M.seed=null;I.shake++;return null}   // phone bumped / lighting jump: relearn
+  const cands=[];
+  if(cnt>=8){
+    mtMorph(m,M.t2,w,h,1);mtMorph(M.t2,m,w,h,1);mtMorph(m,M.t2,w,h,0);   // close holes inside a blurred ball
+    const cm=M.t2,vis=M.vis,st=M.st,W=ballWindow(),aRef=Math.PI/4*Math.pow(ballPx(10,21.5),2);
+    vis.fill(0);let bestRef=1e9;
+    for(let s0=0;s0<n;s0++){
+      if(!cm[s0]||vis[s0])continue;
+      let sp=0,a=0,sx=0,sy=0,sxx=0,syy=0,sxy=0,x0=w,x1=0,y0=h,y1=0;
+      st[sp++]=s0;vis[s0]=1;
+      while(sp){
+        const i=st[--sp],x=i%w,y=(i-x)/w;
+        a++;sx+=x;sy+=y;sxx+=x*x;syy+=y*y;sxy+=x*y;
+        if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
+        if(x>0&&cm[i-1]&&!vis[i-1]){vis[i-1]=1;st[sp++]=i-1}
+        if(x<w-1&&cm[i+1]&&!vis[i+1]){vis[i+1]=1;st[sp++]=i+1}
+        if(y>0&&cm[i-w]&&!vis[i-w]){vis[i-w]=1;st[sp++]=i-w}
+        if(y<h-1&&cm[i+w]&&!vis[i+w]){vis[i+w]=1;st[sp++]=i+w}
+      }
+      if(a<12)continue;                                  // specks
+      const cx=sx/a,cy=sy/a,vx=sxx/a-cx*cx,vy=syy/a-cy*cy,cv=sxy/a-cx*cy;
+      const tr=(vx+vy)/2,df=Math.sqrt(((vx-vy)/2)*((vx-vy)/2)+cv*cv),l1=tr+df,l2=Math.max(tr-df,0.01);
+      const dEst=Math.max(2,4*Math.sqrt(l2)-2);          // minor-axis width = ball diameter even when blur stretches the blob; -2 undoes the closing
+      const asp=Math.sqrt(l1/l2),fill=a/((x1-x0+1)*(y1-y0+1));
+      const q=Math.abs(Math.log(a/aRef));if(q<bestRef){bestRef=q;I.area=a;I.dia=dEst}
+      if(a<W.aMin){I.tiny++;continue}                    // background noise, leaves, net shimmer
+      if(a>W.aMax){I.big++;continue}                     // player legs, torso, shadows
+      if(asp>3.6||fill<0.3||dEst<W.dMin*0.55||dEst>W.dMax*1.7){I.shape++;continue}
+      I.n++;
+      cands.push({cx,cy,d:dEst,a,asp,fill,sc:0.5/(1+(asp-1))+0.5*fill,ex:!!(excl&&excl(cx,cy))});
+    }
+    cands.sort((p,q)=>q.sc-p.sc);if(cands.length>8)cands.length=8;
+    M.dbg=cands;
+  }
+  let out=null,tr=M.track;
+  if(tr&&(t-tr.t)>350){M.track=null;tr=null}
+  if(tr){
+    const dt=Math.max(0.001,(t-tr.t)/1000);
+    const fx=tr.x+tr.vx*dt,fy=tr.y+tr.vy*dt,bx=tr.x-tr.vx*dt,by=tr.y-tr.vy*dt;   // forward guess and the mirror guess (ball bounced back)
+    const gate=Math.max(2.2*tr.d,0.3*Math.hypot(tr.vx,tr.vy)*dt);
+    let best=null,bc=1e9;
+    for(const c of cands){
+      if(segDist(c.cx,c.cy,bx,by,fx,fy)>gate)continue;
+      const cost=Math.hypot(c.cx-fx,c.cy-fy)/tr.d+2*Math.abs(Math.log(c.d/tr.d));
+      if(cost<bc){bc=cost;best=c}
+    }
+    if(best){
+      tr.pts.push({x:best.cx,y:best.cy,t});if(tr.pts.length>3)tr.pts.shift();
+      tr.x=best.cx;tr.y=best.cy;tr.t=t;tr.d=0.6*tr.d+0.4*best.d;tr.miss=0;tr.age++;mtVel(tr);
+      out={x:tr.x,y:tr.y,d:tr.d,predicted:false,born:false,age:tr.age,speedD:Math.hypot(tr.vx,tr.vy)/tr.d};
+    }else{
+      tr.miss++;
+      if(tr.miss>MAX_COAST){M.lost={t,speedD:Math.hypot(tr.vx,tr.vy)/tr.d,x:tr.x,y:tr.y};M.track=null}
+      else{                                              // vanished (blur) or turned on the spot: keep flying along the incoming vector
+        tr.x=fx;tr.y=fy;tr.t=t;tr.vx*=0.94;tr.vy*=0.94;
+        out={x:tr.x,y:tr.y,d:tr.d,predicted:true,born:false,age:tr.age,speedD:Math.hypot(tr.vx,tr.vy)/tr.d};
+      }
+    }
+  }else{
+    const pool=cands.filter(c=>!c.ex),sd=M.seed;
+    let best=null;
+    if(sd&&t-sd.t<250){                                  // a track is born only after two consistent moving blobs
+      let bd=1e9;
+      for(const c of pool){const dd=Math.hypot(c.cx-sd.x,c.cy-sd.y);if(dd<bd&&dd<=6*sd.d&&dd>=Math.max(2.5,0.12*sd.d)&&Math.abs(Math.log(c.d/sd.d))<0.6){bd=dd;best=c}}
+    }
+    if(best){
+      const dt=Math.max(0.001,(t-sd.t)/1000);
+      M.track={x:best.cx,y:best.cy,t,d:0.5*(sd.d+best.d),vx:(best.cx-sd.x)/dt,vy:(best.cy-sd.y)/dt,pts:[{x:sd.x,y:sd.y,t:sd.t},{x:best.cx,y:best.cy,t}],miss:0,age:2};
+      M.seed=null;const k=M.track;
+      out={x:k.x,y:k.y,d:k.d,predicted:false,born:true,age:2,speedD:Math.hypot(k.vx,k.vy)/k.d};
+    }else M.seed=pool.length?{x:pool[0].cx,y:pool[0].cy,d:pool[0].d,t}:null;
+  }
+  return out;
+}
+/*== BALL TRACKER END ==*/
+/* drop-in replacement for the old coco-ssd detector: same detect() call, same prediction objects */
+function makeMotionTracker(){
+  const cv=document.createElement('canvas'),cx=cv.getContext('2d',{willReadFrequently:true});
+  let gray=null,tmp=null;
+  return{detect(cam){
+    const vw=cam.videoWidth,vh=cam.videoHeight;if(!vw||!vh)return null;
+    const sc=GRID_LONG/Math.max(vw,vh),gw=Math.round(vw*sc),gh=Math.round(vh*sc);
+    if(cv.width!==gw||cv.height!==gh){cv.width=gw;cv.height=gh;gray=new Uint8Array(gw*gh);tmp=new Uint8Array(gw*gh)}
+    cx.drawImage(cam,0,0,gw,gh);
+    const px=cx.getImageData(0,0,gw,gh).data;
+    for(let i=0,j=0;i<tmp.length;i++,j+=4)tmp[i]=(px[j]*77+px[j+1]*150+px[j+2]*29)>>8;
+    mtBlur(tmp,gray,gw,gh);
+    const t=performance.now();
+    const excl=(x,y)=>{const e=P.last;if(!e||t-e.t>500)return false;const r=FOOT_EXCL*P.torso*sc;return['l','r'].some(k=>e[k]&&Math.hypot(e[k].x*sc-x,e[k].y*sc-y)<r)};
+    const r=mtStep(gray,gw,gh,t,cfg.sens,excl);
+    if(r===undefined)return null;                        // same camera frame as last time, skip
+    if(M.lost){                                          // ball stopped moving (trapped / at rest): it is now invisible to frame differencing, so arm the next launch
+      const L=M.lost;M.lost=null;
+      if(L.speedD<10){T.armedA=true;T.calmSince=t}
+    }
+    const s=1/sc;
+    M.dbg=M.dbg.map(c=>({x:(c.cx-c.d/2)*s,y:(c.cy-c.d/2)*s,w:c.d*s,ex:c.ex}));
+    if(!r)return[];
+    return[{class:'sports ball',score:r.predicted?0.35:0.9,bbox:[(r.x-r.d/2)*s,(r.y-r.d/2)*s,r.d*s,r.d*s],predicted:r.predicted,born:r.born,age:r.age,speedD:r.speedD}];
+  }};
+}
 /* ---------- detection loop ---------- */
 async function loop(){
   if(!looping)return;
@@ -262,8 +475,10 @@ async function loop(){
     try{
       const t0=performance.now();
       const preds=await ballModel.detect(cam,6);
-      handleBalls(preds,t0);
-      if(poseDet&&(++frameN%2===0))await runPose(performance.now());
+      if(preds){                                         // null = no new camera frame yet
+        handleBalls(preds,t0);
+        if(poseDet&&(++frameN%3===0))await runPose(performance.now());
+      }
       errCount=0;
     }catch(e){console.error(e);if(++errCount>20){looping=false;toast('Detection stopped. Reload the page.',5000)}}
     draw();
@@ -286,7 +501,9 @@ function handleBalls(preds,t){
 function onBall(d,t){
   const [x,y,w,h]=d.bbox,p={t,cx:x+w/2,cy:y+h/2,sz:(w+h)/2};
   T.hist.push(p);while(T.hist.length&&t-T.hist[0].t>1500)T.hist.shift();
-  T.lastSeen=t;T.lastBox=d.bbox;
+  T.lastSeen=t;T.lastBox=d.bbox;T.predicted=!!d.predicted;
+  // launch: after the ball was at rest, a new fast-moving track appears (judged on the track's first 4 frames, no 120 ms history needed)
+  if(d.age<=4&&!d.predicted&&S.running&&!S.finished&&T.armedA&&d.speedD>Math.max(V(),10)&&t-T.lastShot>700)fire();
   let ref=null;for(const q of T.hist){const age=t-q.t;if(age>=120&&age<=380){ref=q;break}}
   if(!ref)return;
   const dt=(t-ref.t)/1000;
@@ -309,7 +526,15 @@ function onNoBall(t){
   if(!S.running||S.finished||!T.armedA||!poseDet)return;
   if(lost>260&&T.calmAtLast&&t-T.lastShot>700&&Math.abs(lastSwingT-T.lastSeen)<700)fire();
 }
-function fire(source='camera'){const now=performance.now();if(!S.running||S.finished||now-T.lastShot<650)return;T.armedA=false;T.tr=0;T.lastShot=now;T.calmSince=0;T.lastImpact=0;registerShot(source)}
+/* source 'audio' (thud) uses the 400 ms debounce; camera sources keep 650 ms and step aside while the mic is live */
+function micLive(){return !!(cfg.micOn&&micAnalyser)}
+function fire(source='camera'){
+  const now=performance.now();
+  if(!S.running||S.finished)return false;
+  if(source==='audio'){if(now-T.lastShot<MIC_COOLDOWN_MS)return false}
+  else{if(MIC_EXCLUSIVE&&micLive())return false;if(now-T.lastShot<650)return false}
+  T.armedA=false;T.tr=0;T.lastShot=now;T.calmSince=0;T.lastImpact=0;registerShot(source);return true;
+}
 
 async function runPose(t){
   const poses=await poseDet.estimatePoses($('cam'));
@@ -345,7 +570,7 @@ function draw(){
   const vw=cam.videoWidth,vh=cam.videoHeight;if(!vw)return;
   const sc=Math.max(W/vw,H/vh),ox=(W-vw*sc)/2,oy=(H-vh*sc)/2,mx=x=>ox+x*sc,my=y=>oy+y*sc,now=performance.now();
   if(cfg.track){
-    if(T.lastBox&&now-T.lastSeen<300){const [x,y,w,h]=T.lastBox;c.strokeStyle='#B6FF3B';c.lineWidth=3;c.strokeRect(mx(x),my(y),w*sc,h*sc)}
+    if(T.lastBox&&now-T.lastSeen<300){const [x,y,w,h]=T.lastBox;c.strokeStyle=T.predicted?'#FFD23F':'#B6FF3B';c.lineWidth=3;c.setLineDash(T.predicted?[8,6]:[]);c.strokeRect(mx(x),my(y),w*sc,h*sc);c.setLineDash([])}
     const e=P.last;
     if(e&&now-e.t<500)[['l','#6FD3FF'],['r','#FFB23F']].forEach(([k,col])=>{if(e[k]){c.fillStyle=col;c.beginPath();c.arc(mx(e[k].x),my(e[k].y),9,0,7);c.fill()}});
   }
@@ -354,6 +579,11 @@ function draw(){
     c.fillText('growth '+T.growth.toFixed(2)+'  need '+G().toFixed(2),16,H-150);
     c.fillText('speed '+T.speed.toFixed(2)+'  need '+V().toFixed(2),16,H-132);
     c.fillText('armed '+(T.armedA?'yes':'no')+'  foot swing '+(now-lastSwingT<900?'yes':'no'),16,H-114);
+    const wn=ballWindow(),I=M.info;
+    c.fillText('blob '+I.area.toFixed(0)+' px2 / dia '+I.dia.toFixed(1)+'   want '+wn.aMin.toFixed(0)+'-'+wn.aMax.toFixed(0)+' px2 / '+wn.dMin.toFixed(1)+'-'+wn.dMax.toFixed(1)+' px',16,H-168);
+    c.fillText('moving px '+I.cnt+'  kept '+I.n+'  tiny '+I.tiny+' big '+I.big+' shape '+I.shape+'  track '+(M.track?('age '+M.track.age+(M.track.miss?' predicted':'')):'none'),16,H-186);
+    c.fillText('mic '+(micAnalyser?MIC.hz:'off')+'  band '+MIC.db.toFixed(0)+' dB  base '+(isFinite(micNoise)?micNoise.toFixed(0):'-')+'  rise '+MIC.rise.toFixed(1)+'  need '+MIC.need.toFixed(1)+'  hi-band '+MIC.hiRise.toFixed(1),16,H-204);
+    c.lineWidth=1;for(const b of M.dbg){c.strokeStyle=b.ex?'#FF4D5E':'rgba(255,255,255,.7)';c.strokeRect(mx(b.x),my(b.y),b.w*sc,b.w*sc)}
   }
 }
 
@@ -492,6 +722,7 @@ $('drill').onchange=e=>{cfg.drill=e.target.value;saveCfg();if(!S.shots.length&&!
 $('sens').oninput=e=>{cfg.sens=+e.target.value;saveCfg()};
 $('facing').onchange=async e=>{cfg.facing=e.target.value;saveCfg();if(!$('app').hidden){try{await startCamera()}catch(err){toast('Could not switch camera.')}}};
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&S.running){setRun(false);toast('Paused while the app was in the background.')}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ac&&ac.state!=='running')ac.resume().catch(()=>{})});
 hud();
 </script>
 </body>
