@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Black Mamba">
+<meta name="theme-color" content="#060707">
+<title>Black Mamba - Football Rebounder</title>
+<link rel="apple-touch-icon" id="touchicon">
+<style>
+:root{--ink:#060707;--panel:#121517;--edge:#252A2D;--lime:#B6FF3B;--paper:#F5F5F5;--mute:#8D979C;--coral:#FF4D5E;--L:#6FD3FF;--R:#FFB23F;--num:ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--ink);color:var(--paper);font-family:-apple-system,"SF Pro Text",system-ui,sans-serif;overflow:hidden;overscroll-behavior:none}
+[hidden]{display:none!important}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+select,input{font:inherit}
+h1,h2,h3,p{margin:0}
+.mute{color:var(--mute)}
+#splash{position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;background:var(--ink)}
+#logo{width:min(64vw,260px);height:auto}
+#splash h1{font:800 34px var(--num);letter-spacing:-.01em;margin-top:8px}
+#splash .sub{color:var(--mute);margin-bottom:20px}
+.primary{background:var(--lime);color:#0A0A0A;font-weight:700;font-size:18px;padding:16px 28px;border-radius:16px;min-width:220px}
+.ghost{color:var(--paper);padding:12px 20px;border-radius:14px;border:1px solid var(--edge)}
+#app{position:fixed;inset:0;background:#000}
+#cam,#ov{position:absolute;inset:0;width:100%;height:100%}
+#cam{object-fit:cover}
+.shade{position:absolute;inset:0;pointer-events:none;background:linear-gradient(rgba(6,7,7,.78),rgba(6,7,7,0) 30%,rgba(6,7,7,0) 56%,rgba(6,7,7,.9))}
+header{position:absolute;left:16px;right:16px;top:calc(env(safe-area-inset-top) + 12px);display:flex;justify-content:space-between;align-items:center}
+.chip{background:rgba(18,21,23,.75);border:1px solid var(--edge);padding:7px 13px;border-radius:999px;font-size:14px}
+.chip.on{border-color:var(--lime);color:var(--lime)}
+#timer{font:700 28px var(--num);font-variant-numeric:tabular-nums;text-shadow:0 2px 10px rgba(0,0,0,.6)}
+#score{position:absolute;left:18px;top:calc(env(safe-area-inset-top) + 62px)}
+#count{font:800 124px/.95 var(--num);font-variant-numeric:tabular-nums;text-shadow:0 2px 14px rgba(0,0,0,.6)}
+#goal{color:var(--mute);font-size:16px;margin:4px 0 10px}
+#feet{display:flex;gap:8px;flex-wrap:wrap}
+.pill{display:inline-flex;gap:8px;align-items:baseline;background:rgba(18,21,23,.78);padding:8px 14px;border-radius:12px;border-left:4px solid var(--edge);font-size:15px}
+.pill b{font:700 22px var(--num);font-variant-numeric:tabular-nums}
+.pill.L{border-left-color:var(--L)}.pill.R{border-left-color:var(--R)}
+#lastShot{margin-top:10px;display:inline-block}
+#adj{display:flex;gap:8px;margin-top:10px}
+#adj button{background:rgba(18,21,23,.75);border:1px solid var(--edge);border-radius:12px;padding:8px 16px;font-weight:600}
+#prompt{position:absolute;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 190px);text-align:center;font:800 30px var(--num);color:var(--lime);text-shadow:0 2px 12px rgba(0,0,0,.8)}
+#rate{position:absolute;right:18px;bottom:calc(env(safe-area-inset-bottom) + 112px);color:var(--paper);font-size:15px;text-shadow:0 1px 8px rgba(0,0,0,.8)}
+nav{position:absolute;left:14px;right:14px;bottom:calc(env(safe-area-inset-bottom) + 16px);display:flex;gap:10px;align-items:stretch}
+nav .sec{flex:1;height:64px;border-radius:14px;background:rgba(18,21,23,.82);border:1px solid var(--edge);font-size:14px}
+nav .main{flex:2.2;height:64px;border-radius:20px;background:var(--lime);color:#0A0A0A;font-weight:800;font-size:20px}
+nav .main.live{background:var(--coral);color:#fff}
+.sheet{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.6);display:flex;align-items:flex-end}
+.panel{width:100%;max-height:88dvh;overflow:auto;background:var(--panel);border-radius:24px 24px 0 0;padding:20px 18px calc(env(safe-area-inset-bottom) + 20px)}
+.panel h2{font:800 24px var(--num);margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:13px 0;border-bottom:1px solid var(--edge)}
+.row select{background:#1B1F22;color:var(--paper);border:1px solid var(--edge);border-radius:10px;padding:8px 10px}
+.row input[type=range]{width:55%;accent-color:var(--lime)}
+.row input[type=checkbox]{width:24px;height:24px;accent-color:var(--lime)}
+.note{color:var(--mute);font-size:14px;line-height:1.5;margin:12px 0}
+.panel .primary{width:100%;margin-top:14px}
+.panel .ghost{width:100%;margin-top:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.cell{background:#1B1F22;border-radius:14px;padding:12px 14px}
+.cell b{display:block;font:800 28px var(--num);font-variant-numeric:tabular-nums}
+.cell span{color:var(--mute);font-size:13px}
+.cell.hero{grid-column:1/-1;border:1px solid var(--lime)}
+.cell.hero b{font-size:52px;color:var(--lime)}
+.bars{display:flex;align-items:flex-end;gap:6px;height:96px;margin:10px 0 16px}
+.bars i{flex:1;background:var(--lime);border-radius:4px 4px 0 0;min-height:3px;opacity:.9}
+.sess{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--edge);font-size:15px}
+#loading{position:fixed;inset:0;z-index:30;background:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:30px;text-align:center}
+.spin{width:38px;height:38px;border-radius:50%;border:4px solid var(--edge);border-top-color:var(--lime);animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+#toast{position:fixed;left:20px;right:20px;bottom:calc(env(safe-area-inset-bottom) + 100px);z-index:40;background:#1B1F22;border:1px solid var(--edge);padding:12px 16px;border-radius:14px;text-align:center}
+#cardImg{width:100%;border-radius:14px}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
+</style>
+</head>
+<body>
+
+<div id="splash">
+  <canvas id="logo" width="520" height="520"></canvas>
+  <h1>Black Mamba</h1>
+  <p class="sub">Football rebounder</p>
+  <button class="primary" id="go">Start training</button>
+  <button class="ghost" id="histOpen">Session history</button>
+</div>
+
+<div id="app" hidden>
+  <video id="cam" playsinline muted autoplay></video>
+  <canvas id="ov"></canvas>
+  <div class="shade"></div>
+  <header><span class="chip" id="status">Ready</span><span id="timer">00:00</span></header>
+  <section id="score">
+    <div id="count">0</div>
+    <div id="goal">shots</div>
+    <div id="feet"><span class="pill L">Left <b id="cL">0</b></span><span class="pill R">Right <b id="cR">0</b></span></div>
+    <button class="chip" id="lastShot" hidden></button>
+    <div id="adj"><button id="minus">Undo shot</button><button id="plus">Add shot</button></div>
+  </section>
+  <div id="prompt" hidden></div>
+  <div id="rate"></div>
+  <nav>
+    <button class="sec" id="histBtn">History</button>
+    <button class="main" id="runBtn">Start</button>
+    <button class="sec" id="endBtn">Finish</button>
+    <button class="sec" id="setBtn">Settings</button>
+  </nav>
+</div>
+
+<div class="sheet" id="sheetSet" hidden><div class="panel">
+  <h2>Settings</h2>
+  <label class="row"><span>Drill</span>
+    <select id="drill">
+      <option value="free">Free training</option>
+      <option value="timed:3">Timed, 3 minutes</option>
+      <option value="timed:5">Timed, 5 minutes</option>
+      <option value="timed:10">Timed, 10 minutes</option>
+      <option value="target:25">Target, 25 shots</option>
+      <option value="target:50">Target, 50 shots</option>
+      <option value="target:100">Target, 100 shots</option>
+      <option value="alt">Alternate feet</option>
+    </select></label>
+  <label class="row"><span>Shot sensitivity</span><input type="range" id="sens" min="1" max="10" step="1"></label>
+  <p class="note">Raise it if real shots are missed. Lower it if extra shots are counted.</p>
+  <label class="row"><span>Spoken count every 10 shots</span><input type="checkbox" id="voice"></label>
+  <label class="row"><span>Beep on each shot</span><input type="checkbox" id="sound"></label>
+  <label class="row"><span>Use microphone for kick detection</span><input type="checkbox" id="micOn"></label>
+  <p class="note">Microphone access is optional. It listens locally for the low "thud" of the ball hitting the rebounder (60 to 250 Hz) and counts one shot per sharp thud, with a short cooldown so net wobble is not double counted. Nothing is recorded or uploaded.</p>
+  <label class="row"><span>Show ball and feet markers</span><input type="checkbox" id="track"></label>
+  <label class="row"><span>Show tuning numbers</span><input type="checkbox" id="debug"></label>
+  <label class="row"><span>Camera</span>
+    <select id="facing"><option value="environment">Rear</option><option value="user">Front</option></select></label>
+  <p class="note">Set the phone on a stand behind the rebounder with the ball and the player's whole body in view. Good light helps a lot.</p>
+  <button class="primary" data-close>Done</button>
+</div></div>
+
+<div class="sheet" id="sheetHist" hidden><div class="panel">
+  <h2>History</h2>
+  <div id="histBody"></div>
+  <button class="ghost" data-close>Close</button>
+</div></div>
+
+<div class="sheet" id="sheetSum" hidden><div class="panel">
+  <h2 id="sumTitle">Session complete</h2>
+  <div id="sumBody"></div>
+  <button class="primary" id="shareBtn">Share card</button>
+  <button class="ghost" id="sumClose">Done</button>
+</div></div>
+
+<div class="sheet" id="sheetCard" hidden><div class="panel">
+  <h2>Session card</h2>
+  <p class="note">Press and hold the image to save it.</p>
+  <img id="cardImg" alt="Session summary card">
+  <button class="ghost" data-close>Close</button>
+</div></div>
+
+<div id="loading" hidden><div class="spin"></div><p id="loadMsg"></p><button class="ghost" id="retry" hidden>Try again</button></div>
+<div id="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const store={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const cfg=Object.assign({sens:5,drill:'free',voice:true,sound:true,track:true,debug:false,facing:'environment'},store.get('bm_cfg',{}));
+const saveCfg=()=>store.set('bm_cfg',cfg);
+
+/* ---------- icon ---------- */
+function rr(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
+function drawIcon(c,size,o){
+  c.save();c.scale(size/300,size/300);c.translate(-40,-40);
+  const g=c.createLinearGradient(40,40,340,340);g.addColorStop(0,'#1B1F22');g.addColorStop(1,'#060707');c.fillStyle=g;
+  if(o.rounded){rr(c,40,40,300,300,68);c.fill()}else{c.fillRect(40,40,300,300)}
+  c.lineCap='round';c.lineJoin='round';
+  const a0=-50*Math.PI/180;
+  c.strokeStyle='#B6FF3B';c.lineWidth=30;c.beginPath();c.arc(190,190,80,a0,a0+430/80);c.stroke();
+  c.fillStyle='#B6FF3B';c.lineWidth=6;c.beginPath();c.moveTo(169,91.2);c.lineTo(210.6,103.8);c.lineTo(177.8,132.2);c.closePath();c.fill();c.stroke();
+  c.fillStyle='#0A0A0A';c.beginPath();c.arc(187,107,4,0,7);c.fill();
+  c.strokeStyle='#FF4D5E';c.lineWidth=2.5;c.beginPath();c.moveTo(216,102);c.lineTo(225,100);c.moveTo(225,100);c.lineTo(233,95);c.moveTo(225,100);c.lineTo(232,104);c.stroke();
+  if(o.text){
+    c.fillStyle='#0A0A0A';c.font='700 20px -apple-system,system-ui,sans-serif';c.textAlign='center';c.textBaseline='alphabetic';
+    const str=[...'BLACK MAMBA'],r=87.2,sp=3,ws=str.map(ch=>c.measureText(ch).width);
+    const tot=ws.reduce((a,b)=>a+b+sp,0)-sp;let pos=0;const start=Math.PI/2+(tot/r)/2;
+    str.forEach((ch,i)=>{const th=start-(pos+ws[i]/2)/r;c.save();c.translate(190+r*Math.cos(th),190+r*Math.sin(th));c.rotate(th-Math.PI/2);c.fillText(ch,0,0);c.restore();pos+=ws[i]+sp});
+  }
+  c.strokeStyle='#F5F5F5';c.lineWidth=6;c.beginPath();
+  [[190,160,190,132],[218.5,180.7,245.2,172.1],[207.6,214.3,224.1,236.9],[172.4,214.3,155.9,236.9],[161.5,180.7,134.8,172.1]].forEach(l=>{c.moveTo(l[0],l[1]);c.lineTo(l[2],l[3])});c.stroke();
+  c.fillStyle='#F5F5F5';c.lineWidth=4;c.beginPath();c.moveTo(190,160);c.lineTo(218.5,180.7);c.lineTo(207.6,214.3);c.lineTo(172.4,214.3);c.lineTo(161.5,180.7);c.closePath();c.fill();c.stroke();
+  c.restore();
+}
+try{
+  drawIcon($('logo').getContext('2d'),520,{rounded:true,text:true});
+  const cv=document.createElement('canvas');cv.width=cv.height=180;drawIcon(cv.getContext('2d'),180,{rounded:false,text:false});
+  $('touchicon').href=cv.toDataURL('image/png');
+}catch(e){}
+
+/* ---------- state ---------- */
+const S={running:false,activeMs:0,tick:performance.now(),shots:[],prompt:'R',ballOn:false,finished:false};
+const T={hist:[],lastSeen:0,calmSince:0,armedA:false,tr:0,lastShot:0,calmAtLast:false,lastBox:null,growth:0,speed:0,lastImpact:0,impactLevel:0,predicted:false};
+const P={hist:[],last:null,torso:150};
+let lastSwingT=-1e9,ballModel=null,poseDet=null,stream=null,looping=false,frameN=0,errCount=0,wake=null,ac=null,micStream=null,micAnalyser=null,micBuffer=null,micRAF=0,micNoise=NaN,micNoiseHi=NaN,micLastPeak=0,micSrc=null,micGain=null,micArmed=true,micMuteUntil=0,micHist=[];
+const thr=()=>2.0-0.15*cfg.sens,G=()=>0.8*thr(),V=()=>3*thr();
+const drillParts=()=>cfg.drill.split(':');
+
+/* ---------- helpers ---------- */
+const fmt=ms=>{const s=Math.max(0,Math.round(ms/1000));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
+function toast(m,ms=2600){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,ms)}
+function beep(){if(!cfg.sound)return;micMuteUntil=performance.now()+300;try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=880;g.gain.value=.08;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.06)}catch(e){}}
+/* voice: always the iPhone "Nicky" voice (Siri US female, voice 4). Falls back to another en-US female voice, never the device's default (en-ZA) */
+let VOICE=null;
+function pickVoice(){
+  if(!('speechSynthesis' in window))return null;
+  const vs=speechSynthesis.getVoices();if(!vs.length)return VOICE;
+  const us=v=>/^en[-_]US$/i.test(v.lang);
+  VOICE=vs.find(v=>/^nicky\b/i.test(v.name)&&us(v))||vs.find(v=>/nicky/i.test(v.name))||vs.find(v=>us(v)&&/samantha|ava|allison|susan|zoe|joelle|nora/i.test(v.name))||vs.find(us)||null;
+  return VOICE;
+}
+if('speechSynthesis' in window){pickVoice();try{speechSynthesis.addEventListener('voiceschanged',pickVoice)}catch(e){speechSynthesis.onvoiceschanged=pickVoice}}
+function say(t){if(!cfg.voice||!('speechSynthesis' in window))return;try{const u=new SpeechSynthesisUtterance(t),v=VOICE||pickVoice();if(v){u.voice=v;u.lang=v.lang}else u.lang='en-US';u.rate=1.05;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
+function unlockAudio(){try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume();if('speechSynthesis' in window)speechSynthesis.speak(new SpeechSynthesisUtterance(''))}catch(e){}}
+/* ---------- microphone: low-frequency thud detector (FFT band, 60-250 Hz) ---------- */
+const MIC_BAND_HZ=[60,250];      // thud window for a heavy ball hitting a rebounder
+const MIC_COOLDOWN_MS=400;       // debounce after a logged shot (net wobble, echo)
+const MIC_MIN_DB=-90;            // ignore spikes whose band level is below this (digital silence flutter)
+const MIC_FFT=4096;              // ~85 ms window at 48 kHz, ~11.7 Hz per bin; survives short main-thread stalls
+const MIC_EXCLUSIVE=true;        // mic on: only the thud counts shots (camera still tracks ball + feet for foot split)
+const MIC_REQUIRE_BALL_MS=0;     // >0: also require a ball-sized moving blob seen within this many ms of the thud
+const MIC_HIGH_BAND_HZ=[500,4000]; // reference band: claps, shouts and whistles light this up far more than the thud band
+const MIC_HIGH_GUARD_DB=10;      // reject a spike if the reference band rose this many dB MORE than the thud band (set 99 to switch off)
+const MIC={lo:6,hi:21,hl:43,hh:341,hz:'',db:-140,rise:0,need:0,hiRise:0,n:0};
+const micNeedDb=()=>16-1.1*cfg.sens;   // dB above the room baseline: sensitivity 1 = 14.9, 5 = 10.5, 10 = 5.0
+function micBins(rate,fft){const hz=rate/fft;return{lo:Math.max(1,Math.ceil(MIC_BAND_HZ[0]/hz)),hi:Math.floor(MIC_BAND_HZ[1]/hz),hz}}
+function micBandDb(a,lo,hi){let p=0;for(let k=lo;k<=hi;k++){const v=a[k];if(v>-140)p+=Math.pow(10,v/10)}return p>0?10*Math.log10(p):-140}
+/* true on the first frame of a sharp rise inside the band; false while it rings out */
+function micDetect(db,now,dbHi=-140){
+  if(!isFinite(micNoise))micNoise=db;
+  if(!isFinite(micNoiseHi))micNoiseHi=dbHi;
+  if(++MIC.n<20){micNoise+=(db-micNoise)*0.2;micNoiseHi+=(dbHi-micNoiseHi)*0.2;return false}   // warm-up: learn the room first
+  micHist.push({t:now,db});while(micHist.length&&now-micHist[0].t>120)micHist.shift();
+  let lo=db;for(const h of micHist)if(h.db<lo)lo=h.db;
+  const need=micNeedDb(),over=db-micNoise,rise=db-lo,overHi=dbHi-micNoiseHi;
+  MIC.db=db;MIC.rise=rise;MIC.need=need;MIC.hiRise=overHi;
+  const hot=db>MIC_MIN_DB&&over>=need&&rise>=need*0.6                 // above baseline AND sharp (not a slow swell)
+    &&(overHi-over)<=MIC_HIGH_GUARD_DB;                               // and low-frequency led (not a clap or shout)
+  if(!hot){
+    micNoise+=(db-micNoise)*(db>micNoise?0.02:0.1);                   // baselines creep up slowly, fall quickly
+    micNoiseHi+=(dbHi-micNoiseHi)*(dbHi>micNoiseHi?0.02:0.1);
+    if(over<need*0.5)micArmed=true;                                   // re-arm once the thud has died away
+    return false;
+  }
+  if(!micArmed||now-micLastPeak<MIC_COOLDOWN_MS)return false;
+  micArmed=false;return true;
+}
+async function startMic(){
+  if(micAnalyser)return true;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){toast('Microphone needs a secure HTTPS page and browser support.',4000);return false}
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false});
+    ac=ac||new(window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')await ac.resume();
+    micSrc=ac.createMediaStreamSource(micStream);micAnalyser=ac.createAnalyser();
+    micAnalyser.fftSize=MIC_FFT;micAnalyser.smoothingTimeConstant=0;micAnalyser.minDecibels=-140;micAnalyser.maxDecibels=0;
+    micGain=ac.createGain();micGain.gain.value=0;                      // silent path to the output: some Safari versions only pull graphs that reach the destination
+    micSrc.connect(micAnalyser);micAnalyser.connect(micGain);micGain.connect(ac.destination);
+    micBuffer=new Float32Array(micAnalyser.frequencyBinCount);
+    const b=micBins(ac.sampleRate,MIC_FFT);MIC.lo=b.lo;MIC.hi=b.hi;MIC.hl=Math.ceil(MIC_HIGH_BAND_HZ[0]/b.hz);MIC.hh=Math.min(micAnalyser.frequencyBinCount-1,Math.floor(MIC_HIGH_BAND_HZ[1]/b.hz));MIC.hz=Math.round(b.lo*b.hz)+'-'+Math.round(b.hi*b.hz)+' Hz';
+    micNoise=NaN;micNoiseHi=NaN;micLastPeak=0;micArmed=true;micHist=[];MIC.n=0;
+    const sample=()=>{
+      if(!micAnalyser)return;
+      micRAF=requestAnimationFrame(sample);
+      const now=performance.now();
+      micAnalyser.getFloatFrequencyData(micBuffer);
+      const db=micBandDb(micBuffer,MIC.lo,MIC.hi),dbHi=micBandDb(micBuffer,MIC.hl,MIC.hh);
+      if(now<micMuteUntil||('speechSynthesis' in window&&speechSynthesis.speaking)){micHist.length=0;return}   // our own beep / spoken count
+      if(micDetect(db,now,dbHi)){
+        T.lastImpact=now;T.impactLevel=db-micNoise;
+        if(S.running&&(!MIC_REQUIRE_BALL_MS||now-T.lastSeen<MIC_REQUIRE_BALL_MS)){if(fire('audio'))micLastPeak=now}
+      }
+    };sample();toast('Microphone kick detection enabled.',2500);return true;
+  }catch(e){stopMic();$('micOn').checked=false;cfg.micOn=false;saveCfg();toast('Microphone access was blocked. Allow microphone access in Safari settings.',4500);return false}
+}
+function stopMic(){if(micRAF)cancelAnimationFrame(micRAF);micRAF=0;micAnalyser=null;micBuffer=null;try{if(micSrc)micSrc.disconnect();if(micGain)micGain.disconnect()}catch(e){}micSrc=null;micGain=null;if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}T.lastImpact=0;}
+async function setWake(on){try{if(on&&'wakeLock' in navigator){wake=await navigator.wakeLock.request('screen')}else if(wake){await wake.release();wake=null}}catch(e){}}
+function showLoading(msg,retry){$('loading').hidden=false;$('loadMsg').textContent=msg;$('retry').hidden=!retry;document.querySelector('.spin').hidden=!!retry}
+const hideLoading=()=>$('loading').hidden=true;
+
+/* ---------- camera & models ---------- */
+async function startCamera(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('secure');
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:cfg.facing},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60}}});
+  const cam=$('cam');cam.setAttribute('playsinline','');cam.muted=true;cam.srcObject=stream;await cam.play();
+}
+async function loadModels(){
+  if(!ballModel)ballModel=makeMotionTracker();            // frame-differencing tracker, nothing to download
+  if(!poseDet){
+    try{
+      if(!window.tf||!window.poseDetection)throw new Error('libs');
+      await tf.ready();showLoading('Loading body tracker…');
+      poseDet=await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,{modelType:poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING});
+    }catch(e){poseDet=null;toast('Foot tracking could not load. Shots will still be counted.',4000)}
+  }
+}
+async function boot(){
+  showLoading('Opening camera…');
+  try{await startCamera()}catch(e){
+    showLoading(e.message==='secure'?'The camera needs this page to be opened over https.':'Camera access was blocked. Allow the camera for this page in Safari settings, then try again.',true);return;
+  }
+  try{await loadModels()}catch(e){showLoading('The detectors could not load. Check your internet connection and try again.',true);return}
+  hideLoading();
+  if(cfg.micOn&&!micAnalyser)startMic();
+  if(!looping){looping=true;requestAnimationFrame(loop)}
+}
+
+/* ---------- ball tracker: frame differencing + background subtraction ---------- */
+/*== BALL TRACKER START ==*/
+const BALL_CM={4:21,5:22};       // size 4 and size 5 ball diameters (cm)
+const DIST_FT={near:8,far:12};   // typical phone-to-ball distance (ft)
+const CAM_HFOV_DEG=66;           // long-side field of view of the iPhone 14 Pro Max 1x camera in video mode; nudge it using "Show tuning numbers"
+const GRID_LONG=320;             // motion analysis grid, long side in px (frames are shrunk to this)
+const MAX_COAST=2;               // frames to predict through blur or a rebound before the track is dropped
+const HOT_CELL=16;               // false-ball memory: grid cell size in px (on the analysis grid)
+const HOT_LIMIT=9;               // a spot that keeps producing ball-like blobs without a real kick is ignored for new tracks
+const HOT_DECAY=0.97;            // per-frame fade of that memory
+const BIRTH_MIN_D=0.35;          // a new track needs to travel at least this many ball diameters between blobs
+const BIRTH_MIN_SPEEDD=4;        // ...and at least this many ball diameters per second (leaves, net shimmer and wobble are slower)
+const FOOT_EXCL=0.45;            // new blobs closer than this many torso lengths to an ankle are ignored (feet look like balls)
+const ballPx=(ft,cm)=>(GRID_LONG/2)/Math.tan(CAM_HFOV_DEG*Math.PI/360)*(cm/100)/(ft*0.3048);   // apparent diameter on the grid
+function ballWindow(){
+  const a=d=>Math.PI/4*d*d,dMin=ballPx(DIST_FT.far,BALL_CM[4]),dMax=ballPx(DIST_FT.near,BALL_CM[5]);
+  // smallest = size 4 at 12 ft, only 45% of it need show up as moving pixels (white ball on pale wall)
+  // largest  = size 5 at 8 ft, x3 to allow motion-blur streaks and the ball nearing the camera; player legs/torso are bigger
+  return{dMin,dMax,aMin:0.45*a(dMin),aMax:3*a(dMax)};
+}
+const M={w:0,h:0,bg:null,p1:null,p2:null,m:null,t2:null,vis:null,st:null,track:null,seed:null,lost:null,dbg:[],info:{cnt:0,n:0,area:0,dia:0,tiny:0,big:0,shape:0,shake:0,hot:0},hot:null};
+function mtAlloc(w,h){const n=w*h;M.w=w;M.h=h;M.bg=new Float32Array(n);M.p1=new Uint8Array(n);M.p2=new Uint8Array(n);M.m=new Uint8Array(n);M.t2=new Uint8Array(n);M.vis=new Uint8Array(n);M.st=new Int32Array(n);M.hot=new Float32Array(Math.ceil(w/HOT_CELL)*Math.ceil(h/HOT_CELL))}
+function mtBlur(a,b,w,h){
+  b.set(a);
+  for(let y=1;y<h-1;y++)for(let x=1,i=y*w+1;x<w-1;x++,i++)
+    b[i]=(a[i-w-1]+2*a[i-w]+a[i-w+1]+2*a[i-1]+4*a[i]+2*a[i+1]+a[i+w-1]+2*a[i+w]+a[i+w+1])>>4;
+}
+function mtMorph(src,dst,w,h,dil){
+  dst.fill(0);
+  for(let y=1;y<h-1;y++)for(let x=1,i=y*w+1;x<w-1;x++,i++){
+    const q=src[i-w-1]+src[i-w]+src[i-w+1]+src[i-1]+src[i]+src[i+1]+src[i+w-1]+src[i+w]+src[i+w+1];
+    dst[i]=dil?(q>0?1:0):(q===9?1:0);
+  }
+}
+function segDist(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay,l=dx*dx+dy*dy;
+  const u=l>0?Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/l)):0;
+  return Math.hypot(px-(ax+u*dx),py-(ay+u*dy));
+}
+/* 3-frame vector estimate: newest segment weighted most; a sudden reversal (rebound) trusts the newest segment only */
+function mtVel(tr){
+  const p=tr.pts,n=p.length;if(n<2)return;
+  const seg=(a,b)=>{const dt=Math.max(0.001,(b.t-a.t)/1000);return[(b.x-a.x)/dt,(b.y-a.y)/dt]};
+  const v2=seg(p[n-2],p[n-1]);
+  if(n===2){tr.vx=v2[0];tr.vy=v2[1];return}
+  const v1=seg(p[n-3],p[n-2]);
+  if(v1[0]*v2[0]+v1[1]*v2[1]<0){tr.vx=v2[0];tr.vy=v2[1];return}
+  tr.vx=0.35*v1[0]+0.65*v2[0];tr.vy=0.35*v1[1]+0.65*v2[1];
+}
+/* g: blurred gray frame (Uint8Array w*h). returns undefined = camera has not delivered a new frame, null = no ball, else the track state */
+function mtStep(g,w,h,t,sens,excl){
+  const n=w*h,I=M.info;
+  if(!M.bg||M.w!==w||M.h!==h){mtAlloc(w,h);for(let i=0;i<n;i++){M.bg[i]=g[i];M.p1[i]=g[i];M.p2[i]=g[i]}M.track=null;M.seed=null;return null}
+  let same=true;for(let i=0;i<n;i+=7){if(g[i]!==M.p1[i]){same=false;break}}
+  if(same)return undefined;
+  const bg=M.bg,p1=M.p1,p2=M.p2,m=M.m;
+  let sI=0,sB=0;for(let i=0;i<n;i++){sI+=g[i];sB+=bg[i]}
+  const off=(sI-sB)/n;                                  // global brightness drift (auto exposure) is subtracted out
+  const T1=Math.max(12,34-2*sens),T2=Math.max(7,T1*0.6),AL=0.04;
+  let cnt=0;
+  for(let i=0;i<n;i++){
+    const v=g[i];
+    // moving = differs from the learned background AND changed in either of the last two frame steps (3-frame test)
+    const on=Math.abs(v-bg[i]-off)>T1&&(Math.abs(v-p1[i])>T2||Math.abs(p1[i]-p2[i])>T2);
+    m[i]=on?1:0;
+    if(on)cnt++;else bg[i]+=(v-off-bg[i])*AL;           // static pixels (incl. a resting ball) melt into the background
+  }
+  p2.set(p1);p1.set(g);
+  I.cnt=cnt;I.n=0;I.tiny=0;I.big=0;I.shape=0;M.dbg=[];
+  if(cnt>0.3*n){for(let i=0;i<n;i++)bg[i]=g[i];M.track=null;M.seed=null;I.shake++;return null}   // phone bumped / lighting jump: relearn
+  const cands=[];
+  if(cnt>=8){
+    mtMorph(m,M.t2,w,h,1);mtMorph(M.t2,m,w,h,1);mtMorph(m,M.t2,w,h,0);   // close holes inside a blurred ball
+    const cm=M.t2,vis=M.vis,st=M.st,W=ballWindow(),aRef=Math.PI/4*Math.pow(ballPx(10,21.5),2);
+    vis.fill(0);let bestRef=1e9;
+    for(let s0=0;s0<n;s0++){
+      if(!cm[s0]||vis[s0])continue;
+      let sp=0,a=0,sx=0,sy=0,sxx=0,syy=0,sxy=0,x0=w,x1=0,y0=h,y1=0;
+      st[sp++]=s0;vis[s0]=1;
+      while(sp){
+        const i=st[--sp],x=i%w,y=(i-x)/w;
+        a++;sx+=x;sy+=y;sxx+=x*x;syy+=y*y;sxy+=x*y;
+        if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
+        if(x>0&&cm[i-1]&&!vis[i-1]){vis[i-1]=1;st[sp++]=i-1}
+        if(x<w-1&&cm[i+1]&&!vis[i+1]){vis[i+1]=1;st[sp++]=i+1}
+        if(y>0&&cm[i-w]&&!vis[i-w]){vis[i-w]=1;st[sp++]=i-w}
+        if(y<h-1&&cm[i+w]&&!vis[i+w]){vis[i+w]=1;st[sp++]=i+w}
+      }
+      if(a<12)continue;                                  // specks
+      const cx=sx/a,cy=sy/a,vx=sxx/a-cx*cx,vy=syy/a-cy*cy,cv=sxy/a-cx*cy;
+      const tr=(vx+vy)/2,df=Math.sqrt(((vx-vy)/2)*((vx-vy)/2)+cv*cv),l1=tr+df,l2=Math.max(tr-df,0.01);
+      const dEst=Math.max(2,4*Math.sqrt(l2)-2);          // minor-axis width = ball diameter even when blur stretches the blob; -2 undoes the closing
+      const asp=Math.sqrt(l1/l2),fill=a/((x1-x0+1)*(y1-y0+1));
+      const q=Math.abs(Math.log(a/aRef));if(q<bestRef){bestRef=q;I.area=a;I.dia=dEst}
+      if(a<W.aMin){I.tiny++;continue}                    // background noise, leaves, net shimmer
+      if(a>W.aMax){I.big++;continue}                     // player legs, torso, shadows
+      if(asp>3.6||fill<0.3||dEst<W.dMin*0.55||dEst>W.dMax*1.7){I.shape++;continue}
+      I.n++;
+      cands.push({cx,cy,d:dEst,a,asp,fill,sc:0.5/(1+(asp-1))+0.5*fill,ex:!!(excl&&excl(cx,cy))});
+    }
+    cands.sort((p,q)=>q.sc-p.sc);if(cands.length>8)cands.length=8;
+    M.dbg=cands;
+  }
+  const hw=Math.ceil(w/HOT_CELL),hotAt=c=>Math.min(hw-1,Math.floor(c.cx/HOT_CELL))+hw*Math.floor(c.cy/HOT_CELL);
+  for(let i=0;i<M.hot.length;i++)M.hot[i]*=HOT_DECAY;
+  for(const c of M.dbg){const k=hotAt(c);if(k>=0&&k<M.hot.length)M.hot[k]+=1}
+  I.hot=0;
+  let out=null,tr=M.track;
+  if(tr&&(t-tr.t)>350){M.track=null;tr=null}
+  if(tr){
+    const dt=Math.max(0.001,(t-tr.t)/1000);
+    const fx=tr.x+tr.vx*dt,fy=tr.y+tr.vy*dt,bx=tr.x-tr.vx*dt,by=tr.y-tr.vy*dt;   // forward guess and the mirror guess (ball bounced back)
+    const gate=Math.max(2.2*tr.d,0.3*Math.hypot(tr.vx,tr.vy)*dt);
+    let best=null,bc=1e9;
+    for(const c of cands){
+      if(segDist(c.cx,c.cy,bx,by,fx,fy)>gate)continue;
+      const cost=Math.hypot(c.cx-fx,c.cy-fy)/tr.d+2*Math.abs(Math.log(c.d/tr.d));
+      if(cost<bc){bc=cost;best=c}
+    }
+    if(best){
+      tr.pts.push({x:best.cx,y:best.cy,t});if(tr.pts.length>3)tr.pts.shift();
+      tr.x=best.cx;tr.y=best.cy;tr.t=t;tr.d=0.6*tr.d+0.4*best.d;tr.miss=0;tr.age++;mtVel(tr);
+      out={x:tr.x,y:tr.y,d:tr.d,predicted:false,born:false,age:tr.age,speedD:Math.hypot(tr.vx,tr.vy)/tr.d};
+    }else{
+      tr.miss++;
+      if(tr.miss>MAX_COAST){M.lost={t,speedD:Math.hypot(tr.vx,tr.vy)/tr.d,x:tr.x,y:tr.y};M.track=null}
+      else{                                              // vanished (blur) or turned on the spot: keep flying along the incoming vector
+        tr.x=fx;tr.y=fy;tr.t=t;tr.vx*=0.94;tr.vy*=0.94;
+        out={x:tr.x,y:tr.y,d:tr.d,predicted:true,born:false,age:tr.age,speedD:Math.hypot(tr.vx,tr.vy)/tr.d};
+      }
+    }
+  }else{
+    const pool=cands.filter(c=>{if(c.ex)return false;const k=hotAt(c);if(k>=0&&k<M.hot.length&&M.hot[k]>HOT_LIMIT){I.hot++;return false}return true}),sd=M.seed;
+    let best=null;
+    if(sd&&t-sd.t<250){                                  // a track is born only after THREE consistent moving blobs that really travel
+      let bd=1e9;
+      const dtS=Math.max(0.001,(t-sd.t)/1000);
+      for(const c of pool){
+        const dd=Math.hypot(c.cx-sd.x,c.cy-sd.y);
+        if(dd>6*sd.d||Math.abs(Math.log(c.d/sd.d))>=0.6)continue;
+        if(dd<Math.max(2.5,BIRTH_MIN_D*sd.d)||dd/sd.d/dtS<BIRTH_MIN_SPEEDD)continue;   // sitting still or crawling = not a kicked ball
+        if(sd.n>=2){                                     // third blob: must carry on in roughly the same direction (within ~60 degrees)
+          const ux=sd.x-sd.px,uy=sd.y-sd.py,ul=Math.hypot(ux,uy)||1,vx=c.cx-sd.x,vy=c.cy-sd.y,vl=Math.hypot(vx,vy)||1;
+          if((ux*vx+uy*vy)/(ul*vl)<0.5)continue;
+        }
+        if(dd<bd){bd=dd;best=c}
+      }
+    }
+    if(best&&sd.n<2){                                    // second blob: remember the path, wait for a third
+      M.seed={x:best.cx,y:best.cy,d:0.5*(sd.d+best.d),t,n:2,px:sd.x,py:sd.y,pt:sd.t};
+    }else if(best){
+      const dt=Math.max(0.001,(t-sd.t)/1000);
+      M.track={x:best.cx,y:best.cy,t,d:0.5*(sd.d+best.d),vx:(best.cx-sd.x)/dt,vy:(best.cy-sd.y)/dt,pts:[{x:sd.px,y:sd.py,t:sd.pt},{x:sd.x,y:sd.y,t:sd.t},{x:best.cx,y:best.cy,t}],miss:0,age:3};
+      M.seed=null;const k=M.track;
+      out={x:k.x,y:k.y,d:k.d,predicted:false,born:true,age:3,speedD:Math.hypot(k.vx,k.vy)/k.d};
+    }else M.seed=pool.length?{x:pool[0].cx,y:pool[0].cy,d:pool[0].d,t,n:1,px:pool[0].cx,py:pool[0].cy,pt:t}:null;
+  }
+  return out;
+}
+/*== BALL TRACKER END ==*/
+/* drop-in replacement for the old coco-ssd detector: same detect() call, same prediction objects */
+function makeMotionTracker(){
+  const cv=document.createElement('canvas'),cx=cv.getContext('2d',{willReadFrequently:true});
+  let gray=null,tmp=null;
+  return{detect(cam){
+    const vw=cam.videoWidth,vh=cam.videoHeight;if(!vw||!vh)return null;
+    const sc=GRID_LONG/Math.max(vw,vh),gw=Math.round(vw*sc),gh=Math.round(vh*sc);
+    if(cv.width!==gw||cv.height!==gh){cv.width=gw;cv.height=gh;gray=new Uint8Array(gw*gh);tmp=new Uint8Array(gw*gh)}
+    cx.drawImage(cam,0,0,gw,gh);
+    const px=cx.getImageData(0,0,gw,gh).data;
+    for(let i=0,j=0;i<tmp.length;i++,j+=4)tmp[i]=(px[j]*77+px[j+1]*150+px[j+2]*29)>>8;
+    mtBlur(tmp,gray,gw,gh);
+    const t=performance.now();
+    const excl=(x,y)=>{const e=P.last;if(!e||t-e.t>500)return false;const r=FOOT_EXCL*P.torso*sc;return['l','r'].some(k=>e[k]&&Math.hypot(e[k].x*sc-x,e[k].y*sc-y)<r)};
+    const r=mtStep(gray,gw,gh,t,cfg.sens,excl);
+    if(r===undefined)return null;                        // same camera frame as last time, skip
+    if(M.lost){                                          // ball stopped moving (trapped / at rest): it is now invisible to frame differencing, so arm the next launch
+      const L=M.lost;M.lost=null;
+      if(L.speedD<10){T.armedA=true;T.calmSince=t}
+    }
+    const s=1/sc;
+    M.dbg=M.dbg.map(c=>({x:(c.cx-c.d/2)*s,y:(c.cy-c.d/2)*s,w:c.d*s,ex:c.ex}));
+    if(!r)return[];
+    return[{class:'sports ball',score:r.predicted?0.35:0.9,bbox:[(r.x-r.d/2)*s,(r.y-r.d/2)*s,r.d*s,r.d*s],predicted:r.predicted,born:r.born,age:r.age,speedD:r.speedD}];
+  }};
+}
+/* ---------- detection loop ---------- */
+async function loop(){
+  if(!looping)return;
+  const cam=$('cam');
+  if(cam.readyState>=2&&!document.hidden){
+    try{
+      const t0=performance.now();
+      const preds=await ballModel.detect(cam,6);
+      if(preds){                                         // null = no new camera frame yet
+        handleBalls(preds,t0);
+        if(poseDet&&(++frameN%3===0))await runPose(performance.now());
+      }
+      errCount=0;
+    }catch(e){console.error(e);if(++errCount>20){looping=false;toast('Detection stopped. Reload the page.',5000)}}
+    draw();
+  }
+  if(looping)requestAnimationFrame(loop);
+}
+function handleBalls(preds,t){
+  const balls=preds.filter(p=>p.class==='sports ball');
+  let b=null;
+  if(balls.length){
+    if(T.lastBox&&t-T.lastSeen<1500){
+      const lx=T.lastBox[0]+T.lastBox[2]/2,ly=T.lastBox[1]+T.lastBox[3]/2;
+      const d=p=>Math.hypot(p.bbox[0]+p.bbox[2]/2-lx,p.bbox[1]+p.bbox[3]/2-ly);
+      balls.sort((a,c)=>d(a)-d(c));
+    }else balls.sort((a,c)=>c.score-a.score);
+    b=balls[0];
+  }
+  if(b){S.ballOn=true;onBall(b,t)}else{S.ballOn=false;onNoBall(t)}
+}
+function onBall(d,t){
+  const [x,y,w,h]=d.bbox,p={t,cx:x+w/2,cy:y+h/2,sz:(w+h)/2};
+  T.hist.push(p);while(T.hist.length&&t-T.hist[0].t>1500)T.hist.shift();
+  T.lastSeen=t;T.lastBox=d.bbox;T.predicted=!!d.predicted;
+  // launch: after the ball was at rest, a new fast-moving track appears (judged on the track's first 5 frames, no 120 ms history needed)
+  if(d.age<=5&&!d.predicted&&S.running&&!S.finished&&T.armedA&&d.speedD>Math.max(V(),10)&&t-T.lastShot>700)fire();
+  let ref=null;for(const q of T.hist){const age=t-q.t;if(age>=120&&age<=380){ref=q;break}}
+  if(!ref)return;
+  const dt=(t-ref.t)/1000;
+  const growth=Math.log(p.sz/ref.sz)/dt;
+  const speed=Math.hypot(p.cx-ref.cx,p.cy-ref.cy)/((p.sz+ref.sz)/2)/dt;
+  T.growth=growth;T.speed=speed;
+  const calm=speed<0.8&&Math.abs(growth)<0.4;
+  T.calmAtLast=calm;
+  if(calm){if(!T.calmSince)T.calmSince=t;if(t-T.calmSince>=350)T.armedA=true}else T.calmSince=0;
+  if(growth<-G()*0.6)T.tr=t;
+  if(!S.running||S.finished)return;
+  if(t-T.lastShot<700)return;
+  if(T.armedA&&(growth>G()||speed>V()))fire();
+  else if(T.tr&&t-T.tr<3000&&growth>G())fire();
+}
+function onNoBall(t){
+  if(!T.lastSeen)return;
+  const lost=t-T.lastSeen;
+  if(lost>1500){T.hist=[];T.calmSince=0;T.armedA=false;T.tr=0;return}
+  if(!S.running||S.finished||!T.armedA||!poseDet)return;
+  if(lost>260&&T.calmAtLast&&t-T.lastShot>700&&Math.abs(lastSwingT-T.lastSeen)<700)fire();
+}
+/* source 'audio' (thud) uses the 400 ms debounce; camera sources keep 650 ms and step aside while the mic is live */
+function micLive(){return !!(cfg.micOn&&micAnalyser)}
+function fire(source='camera'){
+  const now=performance.now();
+  if(!S.running||S.finished)return false;
+  if(source==='audio'){if(now-T.lastShot<MIC_COOLDOWN_MS)return false}
+  else{if(MIC_EXCLUSIVE&&micLive())return false;if(now-T.lastShot<650)return false}
+  T.armedA=false;T.tr=0;T.lastShot=now;T.calmSince=0;T.lastImpact=0;registerShot(source);return true;
+}
+
+async function runPose(t){
+  const poses=await poseDet.estimatePoses($('cam'));
+  if(!poses.length){P.last=null;return}
+  const k=poses[0].keypoints,get=n=>k.find(p=>p.name===n);
+  const la=get('left_ankle'),ra=get('right_ankle'),ls=get('left_shoulder'),rs=get('right_shoulder'),lh=get('left_hip'),rh=get('right_hip');
+  if([ls,rs,lh,rh].every(p=>p&&p.score>0.3)){
+    P.torso=Math.max(30,Math.hypot((ls.x+rs.x)/2-(lh.x+rh.x)/2,(ls.y+rs.y)/2-(lh.y+rh.y)/2));
+  }
+  const e={t,l:la&&la.score>0.25?{x:la.x,y:la.y}:null,r:ra&&ra.score>0.25?{x:ra.x,y:ra.y}:null,lsp:0,rsp:0};
+  const prev=P.hist[P.hist.length-1];
+  if(prev&&t-prev.t<400){
+    const dt=(t-prev.t)/1000;
+    if(e.l&&prev.l)e.lsp=Math.hypot(e.l.x-prev.l.x,e.l.y-prev.l.y)/dt/P.torso;
+    if(e.r&&prev.r)e.rsp=Math.hypot(e.r.x-prev.r.x,e.r.y-prev.r.y)/dt/P.torso;
+  }
+  P.hist.push(e);while(P.hist.length&&t-P.hist[0].t>2000)P.hist.shift();
+  P.last=e;
+  if(e.lsp>7||e.rsp>7){lastSwingT=t;if(S.running&&T.lastImpact&&Math.abs(t-T.lastImpact)<550&&t-T.lastShot>700)fire('foot+audio')}
+}
+function pickFoot(t){
+  let ml=0,mr=0;
+  for(const e of P.hist){if(e.t>=t-900&&e.t<=t+60){ml=Math.max(ml,e.lsp);mr=Math.max(mr,e.rsp)}}
+  if(Math.max(ml,mr)<3)return '?';
+  return ml>mr?'L':'R';
+}
+
+/* ---------- overlay ---------- */
+function draw(){
+  const ov=$('ov'),cam=$('cam'),W=innerWidth,H=innerHeight;
+  if(ov.width!==W||ov.height!==H){ov.width=W;ov.height=H}
+  const c=ov.getContext('2d');c.clearRect(0,0,W,H);
+  const vw=cam.videoWidth,vh=cam.videoHeight;if(!vw)return;
+  const sc=Math.max(W/vw,H/vh),ox=(W-vw*sc)/2,oy=(H-vh*sc)/2,mx=x=>ox+x*sc,my=y=>oy+y*sc,now=performance.now();
+  if(cfg.track){
+    if(T.lastBox&&now-T.lastSeen<300){const [x,y,w,h]=T.lastBox;c.strokeStyle=T.predicted?'#FFD23F':'#B6FF3B';c.lineWidth=3;c.setLineDash(T.predicted?[8,6]:[]);c.strokeRect(mx(x),my(y),w*sc,h*sc);c.setLineDash([])}
+    const e=P.last;
+    if(e&&now-e.t<500)[['l','#6FD3FF'],['r','#FFB23F']].forEach(([k,col])=>{if(e[k]){c.fillStyle=col;c.beginPath();c.arc(mx(e[k].x),my(e[k].y),9,0,7);c.fill()}});
+  }
+  if(cfg.debug){
+    c.fillStyle='#fff';c.font='14px ui-monospace,monospace';
+    c.fillText('growth '+T.growth.toFixed(2)+'  need '+G().toFixed(2),16,H-150);
+    c.fillText('speed '+T.speed.toFixed(2)+'  need '+V().toFixed(2),16,H-132);
+    c.fillText('armed '+(T.armedA?'yes':'no')+'  foot swing '+(now-lastSwingT<900?'yes':'no'),16,H-114);
+    const wn=ballWindow(),I=M.info;
+    c.fillText('blob '+I.area.toFixed(0)+' px2 / dia '+I.dia.toFixed(1)+'   want '+wn.aMin.toFixed(0)+'-'+wn.aMax.toFixed(0)+' px2 / '+wn.dMin.toFixed(1)+'-'+wn.dMax.toFixed(1)+' px',16,H-168);
+    c.fillText('moving px '+I.cnt+'  kept '+I.n+'  tiny '+I.tiny+' big '+I.big+' shape '+I.shape+' hot '+I.hot+'  track '+(M.track?('age '+M.track.age+(M.track.miss?' predicted':'')):'none'),16,H-186);
+    c.fillText('voice '+(VOICE?VOICE.name+' ('+VOICE.lang+')':'none found, using en-US'),16,H-222);
+    c.fillText('mic '+(micAnalyser?MIC.hz:'off')+'  band '+MIC.db.toFixed(0)+' dB  base '+(isFinite(micNoise)?micNoise.toFixed(0):'-')+'  rise '+MIC.rise.toFixed(1)+'  need '+MIC.need.toFixed(1)+'  hi-band '+MIC.hiRise.toFixed(1),16,H-204);
+    c.lineWidth=1;for(const b of M.dbg){c.strokeStyle=b.ex?'#FF4D5E':'rgba(255,255,255,.7)';c.strokeRect(mx(b.x),my(b.y),b.w*sc,b.w*sc)}
+  }
+}
+
+/* ---------- session ---------- */
+function registerShot(source='camera'){
+  const foot=pickFoot(performance.now());
+  const sh={rel:S.activeMs,foot,ok:null,exp:null,source};
+  if(cfg.drill==='alt'){sh.exp=S.prompt;if(foot!=='?')sh.ok=foot===S.prompt;S.prompt=S.prompt==='L'?'R':'L'}
+  S.shots.push(sh);beep();
+  const n=S.shots.length;if(n%10===0)say(String(n));
+  const d=drillParts();if(d[0]==='target'&&n>=+d[1])finish('Target reached');
+  hud();
+}
+const footName=f=>f==='L'?'Left foot':f==='R'?'Right foot':'Foot unknown';
+function hud(){
+  const n=S.shots.length,L=S.shots.filter(s=>s.foot==='L').length,R=S.shots.filter(s=>s.foot==='R').length,d=drillParts();
+  $('count').textContent=n;$('cL').textContent=L;$('cR').textContent=R;
+  let tm=S.activeMs;if(d[0]==='timed')tm=Math.max(0,d[1]*60000-S.activeMs);
+  $('timer').textContent=fmt(tm);
+  $('goal').textContent=d[0]==='target'?'of '+d[1]+' shots':'shots';
+  $('rate').textContent=S.activeMs>5000?(n/(S.activeMs/60000)).toFixed(1)+' shots per minute':'';
+  const last=S.shots[n-1],ls=$('lastShot');
+  if(last){ls.hidden=false;ls.textContent='Last: '+footName(last.foot)+(last.ok===true?', correct':last.ok===false?', wrong foot':'')+'. Tap to switch'}else ls.hidden=true;
+  const pr=$('prompt');
+  if(cfg.drill==='alt'&&!S.finished){pr.hidden=false;pr.textContent='Next: '+(S.prompt==='L'?'left':'right')+' foot'}else pr.hidden=true;
+  const live=S.running;
+  $('runBtn').textContent=live?'Pause':(n||S.activeMs?'Resume':'Start');
+  $('runBtn').classList.toggle('live',live);
+  const st=$('status');
+  st.textContent=!live?(n||S.activeMs?'Paused':'Ready'):(S.ballOn?'Ball tracked':'Looking for ball');
+  st.classList.toggle('on',live&&S.ballOn);
+}
+setInterval(()=>{
+  const now=performance.now();
+  if(S.running)S.activeMs+=now-S.tick;
+  S.tick=now;
+  const d=drillParts();if(S.running&&d[0]==='timed'&&S.activeMs>=d[1]*60000)finish('Time is up');
+  hud();
+},200);
+function setRun(on){
+  if(S.finished)return;
+  S.running=on;S.tick=performance.now();
+  if(on){T.armedA=false;T.tr=0;T.lastShot=performance.now();T.lastImpact=0}
+  setWake(on);hud();
+}
+function resetSession(){
+  S.running=false;S.activeMs=0;S.shots=[];S.prompt='R';S.finished=false;T.armedA=false;T.tr=0;T.lastImpact=0;setWake(false);hud();
+}
+function stats(shots,ms){
+  const n=shots.length,L=shots.filter(s=>s.foot==='L').length,R=shots.filter(s=>s.foot==='R').length;
+  let best=0,cur=0;
+  for(let i=0;i<n;i++){cur=(i>0&&shots[i].rel-shots[i-1].rel<6000)?cur+1:1;best=Math.max(best,cur)}
+  let fast10=null;
+  if(n>=10){fast10=Infinity;for(let i=9;i<n;i++)fast10=Math.min(fast10,shots[i].rel-shots[i-9].rel)}
+  const alt=shots.filter(s=>s.ok!==null),ok=alt.filter(s=>s.ok).length;
+  return{n,L,R,U:n-L-R,streak:best,fast10,spm:ms>0?n/(ms/60000):0,ms,altTotal:alt.length,altOk:ok};
+}
+const pct=(a,b)=>b?Math.round(a/b*100)+'%':'-';
+const cell=(v,l,cls='')=>'<div class="cell '+cls+'"><b>'+v+'</b><span>'+l+'</span></div>';
+let lastSummary=null;
+function finish(msg){
+  if(S.finished)return;
+  S.running=false;setWake(false);
+  const st=stats(S.shots,S.activeMs),h=store.get('bm_sessions',[]);
+  const prevBest=h.length?Math.max(...h.map(x=>x.n)):0;
+  const prevFast=h.filter(x=>x.fast10).map(x=>x.fast10);const pf=prevFast.length?Math.min(...prevFast):null;
+  S.finished=true;
+  if(st.n>0||S.activeMs>5000){h.push(Object.assign({date:Date.now(),drill:cfg.drill},st));store.set('bm_sessions',h.slice(-200))}
+  lastSummary=st;
+  let html='<div class="grid">'+cell(st.n,'shots','hero')+cell(fmt(st.ms),'time')+cell(st.spm.toFixed(1),'shots per minute')
+   +cell(st.L+' left / '+st.R+' right','foot split ('+pct(st.L,st.L+st.R)+' / '+pct(st.R,st.L+st.R)+')')+cell(st.streak,'best streak');
+  if(st.fast10)html+=cell((st.fast10/1000).toFixed(1)+' s','fastest 10 shots');
+  if(st.altTotal)html+=cell(pct(st.altOk,st.altTotal),'correct foot in alternate drill');
+  html+='</div>';
+  if(st.n>prevBest&&prevBest>0)html+='<p class="note">New personal best for shots in a session.</p>';
+  if(st.fast10&&pf&&st.fast10<pf)html+='<p class="note">New personal best for fastest 10 shots.</p>';
+  $('sumTitle').textContent=msg||'Session complete';$('sumBody').innerHTML=html;
+  openSheet('sheetSum');say(msg||'Session complete');hud();
+}
+function renderHist(){
+  const h=store.get('bm_sessions',[]),el=$('histBody');
+  if(!h.length){el.innerHTML='<p class="note">No sessions yet. Finish a session and it will appear here.</p>';return}
+  const best=Math.max(...h.map(x=>x.n)),bs=Math.max(...h.map(x=>x.streak||0)),f=h.filter(x=>x.fast10).map(x=>x.fast10);
+  const last=h.slice(-12),mx=Math.max(...last.map(x=>x.n),1);
+  let html='<div class="grid">'+cell(best,'most shots in a session')+cell(bs,'best streak')+(f.length?cell((Math.min(...f)/1000).toFixed(1)+' s','fastest 10 shots'):'')+cell(h.length,'sessions')+'</div>';
+  html+='<div class="bars">'+last.map(x=>'<i style="height:'+Math.max(3,x.n/mx*100)+'%" title="'+x.n+'"></i>').join('')+'</div>';
+  html+=h.slice().reverse().slice(0,30).map(x=>'<div class="sess"><span>'+new Date(x.date).toLocaleDateString(undefined,{day:'numeric',month:'short'})+'</span><span>'+x.n+' shots</span><span class="mute">'+x.L+' L / '+x.R+' R</span><span class="mute">'+fmt(x.ms)+'</span></div>').join('');
+  $('histBody').innerHTML=html;
+}
+function shareCard(){
+  const st=lastSummary;if(!st)return;
+  const c=document.createElement('canvas');c.width=1080;c.height=1350;const x=c.getContext('2d');
+  x.fillStyle='#060707';x.fillRect(0,0,1080,1350);
+  x.save();x.translate(390,70);drawIcon(x,300,{rounded:true,text:true});x.restore();
+  x.textAlign='center';x.fillStyle='#F5F5F5';x.font='800 54px ui-rounded,-apple-system,system-ui,sans-serif';x.fillText('Black Mamba',540,470);
+  x.fillStyle='#8D979C';x.font='500 30px -apple-system,system-ui,sans-serif';x.fillText(new Date().toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'}),540,515);
+  x.fillStyle='#B6FF3B';x.font='800 260px ui-rounded,-apple-system,system-ui,sans-serif';x.fillText(String(st.n),540,780);
+  x.fillStyle='#8D979C';x.font='500 36px -apple-system,system-ui,sans-serif';x.fillText('shots',540,830);
+  const rows=[['Time',fmt(st.ms)],['Shots per minute',st.spm.toFixed(1)],['Left / right',st.L+' / '+st.R],['Best streak',String(st.streak)]];
+  if(st.fast10)rows.push(['Fastest 10 shots',(st.fast10/1000).toFixed(1)+' s']);
+  rows.forEach((r,i)=>{const y=930+i*70;x.textAlign='left';x.fillStyle='#8D979C';x.font='500 34px -apple-system,system-ui,sans-serif';x.fillText(r[0],160,y);x.textAlign='right';x.fillStyle='#F5F5F5';x.font='700 38px ui-rounded,-apple-system,system-ui,sans-serif';x.fillText(r[1],920,y)});
+  c.toBlob(async b=>{
+    const f=new File([b],'black-mamba-session.png',{type:'image/png'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:'Black Mamba session'});return}catch(e){if(e&&e.name==='AbortError')return}}
+    $('cardImg').src=URL.createObjectURL(b);openSheet('sheetCard');
+  },'image/png');
+}
+
+/* ---------- sheets & controls ---------- */
+function openSheet(id){$(id).hidden=false}
+function closeSheets(){document.querySelectorAll('.sheet').forEach(s=>s.hidden=true)}
+document.querySelectorAll('.sheet').forEach(s=>s.addEventListener('click',e=>{if(e.target===s&&s.id!=='sheetSum')s.hidden=true}));
+document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',closeSheets));
+$('go').onclick=()=>{unlockAudio();$('splash').hidden=true;$('app').hidden=false;hud();boot()};
+$('retry').onclick=()=>{unlockAudio();boot()};
+$('histOpen').onclick=()=>{renderHist();openSheet('sheetHist')};
+$('histBtn').onclick=()=>{renderHist();openSheet('sheetHist')};
+$('setBtn').onclick=()=>openSheet('sheetSet');
+$('runBtn').onclick=()=>{unlockAudio();setRun(!S.running)};
+$('endBtn').onclick=()=>{if(!S.shots.length&&S.activeMs<5000){toast('Nothing to save yet.');return}finish('Session complete')};
+$('minus').onclick=()=>{S.shots.pop();hud()};
+$('plus').onclick=()=>{S.shots.push({rel:S.activeMs,foot:'?',ok:null,exp:null});hud()};
+$('lastShot').onclick=()=>{
+  const s=S.shots[S.shots.length-1];if(!s)return;
+  s.foot=s.foot==='L'?'R':'L';
+  if(s.exp)s.ok=s.foot===s.exp;
+  hud();
+};
+$('shareBtn').onclick=shareCard;
+$('sumClose').onclick=()=>{closeSheets();resetSession()};
+$('drill').value=cfg.drill;$('sens').value=cfg.sens;
+['voice','sound','track','debug'].forEach(k=>{$(k).checked=cfg[k];$(k).onchange=e=>{cfg[k]=e.target.checked;saveCfg()}});
+cfg.micOn=!!cfg.micOn;$('micOn').checked=cfg.micOn;$('micOn').onchange=async e=>{cfg.micOn=e.target.checked;saveCfg();if(cfg.micOn){unlockAudio();const ok=await startMic();if(!ok){cfg.micOn=false;saveCfg();}}else{stopMic();toast('Microphone kick detection disabled.',2000)}};
+$('facing').value=cfg.facing;
+$('drill').onchange=e=>{cfg.drill=e.target.value;saveCfg();if(!S.shots.length&&!S.activeMs)S.prompt='R';hud()};
+$('sens').oninput=e=>{cfg.sens=+e.target.value;saveCfg()};
+$('facing').onchange=async e=>{cfg.facing=e.target.value;saveCfg();if(!$('app').hidden){try{await startCamera()}catch(err){toast('Could not switch camera.')}}};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&S.running){setRun(false);toast('Paused while the app was in the background.')}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ac&&ac.state!=='running')ac.resume().catch(()=>{})});
+hud();
+</script>
+</body>
+</html>
